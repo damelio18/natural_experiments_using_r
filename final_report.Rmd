@@ -1,0 +1,639 @@
+---
+title: |
+  | ![](Title_Cover.png){width=5in}
+  | Replication of Dinuk S. Jayasuriya & Paul J. Burke's Study:
+  |
+  | *Female parliamentarians and economic growth: evidence from a large panel*
+  | 
+  |
+  |
+subtitle: "Assignment for Natural Experiments Using R"
+author: |
+  |
+  | 
+  | By Davide Rossi & Daniel D'Amelio 
+  | 
+date: "Friday 7th October 2022"
+output:
+  bookdown::pdf_document2:
+    fig_caption: yes
+    toc: no
+    number_sections: true
+    extra_dependencies: ["float"]
+#header-includes:
+#\usepackage{subfig} 
+#\usepackage{float}
+#\floatplacement{figure}{H}
+  
+    
+---
+
+\newpage 
+\tableofcontents
+\newpage
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.pos= "H")
+```
+
+```{r, echo = FALSE, results = 'hide', error = FALSE, warning = FALSE, message = FALSE}
+# Load Libraries
+library(knitr)
+library(kableExtra)
+library(tidyverse)
+library(tidyr)
+library(ggplot2)
+library(fixest)
+library(dplyr)
+library(plm)
+library(modelsummary)
+library(tibble)
+```
+
+```{r, echo = FALSE, results = 'hide', error = FALSE, warning = FALSE, message = FALSE}
+# Data Import
+data <- read.csv("jayasuriya_burke_2013.csv", header = TRUE, sep = ";")
+```
+
+################################################################################
+
+# Introduction
+## Background
+This report aims to reproduce and review Dinuk S. Jayasuriya and Paul J. Burke's research paper, *'Female parliamentarians and economic growth: evidence from a large panel'*. Specifically, we will focus on the results from Table 1: Columns 1 and 2 (World Bank Data) within the paper.
+
+Their paper investigates whether female political representation affects economic growth. Their report cites previous works of a similar nature which explore the effect of women on different areas of society. However, Jayasuriya and Burke's study is the first to examine the effect of female parliamentarians on the national economic growth rate. Their approach used panel data for 119 democracies between 1970 and 2009, using the fixed-effects estimator and the Generalized Method of Moments (GMM) estimator.
+
+################################################################################
+
+## Motivation
+
+Economic growth is considered one of the most important economic goals for most countries worldwide as it shows signs of successful economic policy and should, in theory, improve the quality of the lives of the population. The Cambridge Dictionary defines economic growth as *'an increase in the economy of a country or an area, especially of the value of goods and services the country or area produces'* [^EconomicGrowth]. 
+
+The World Bank estimates that in 2021 the percentage of women globally was at 49.6% [^FemalePop]. However, in many areas of society, there isn't the same equal split between the genders. The proportion of women in many areas of society has come under extreme scrutiny in recent years as both women and men question why there is this unbalance. Some industries have adopted quotas to ensure more women are represented in positions of power to make a long-term change and inspire the next generation of women that there is no glass ceiling.
+
+An area of particular importance is the representation of women in parliaments. An equal share of women making key policy decisions gives them a platform for their voices to be heard and ensure that the political decisions made are not disproportionately suppressing the women population. From the data used for Jayasuriya and Burke's study, Figure \@ref(fig:1) shows the average proportion of women in parliament across the 119 countries in the study from 1970 to 2009. There appears to be a positive trend between the proportion of women in parliament and an increase in time. So, with the rise in the proportion of women in parliaments around the 119 countries within the specified period, did it affect economic growth?
+
+```{r 1, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, out.width="50%", fig.align = 'center', fig.cap="Average Proportion of Women in Parliament from 1970 to 2009"}
+# Omit columns not needed for visual
+vis_1 <- dplyr::select(data, -c('lngdp_dif_rs', 'lngdp_dif_pwt_rs', 'lloggdppercapcon', 'llngdpp_penn', 'enrolprgr',
+                                'openness_gdp', 'investment_sharegdp', 'populationgrowth', 'ldemocracy_cheibub', 'ccode'))
+
+# Aggregate data
+vis_1 <- aggregate(vis_1,
+                by = list(vis_1$year),
+                FUN = mean,
+                na.rm = TRUE)
+
+# Remove observations from pre-1970
+vis_1 <- subset(vis_1, year > 1970) 
+
+# Plot data
+ggplot(vis_1, aes(x=year, y=pow)) +
+  geom_line(col = "red") +
+  #("Average Proportion of Women in Parliament from 1970 to 2009") + 
+  theme(plot.title = element_text(hjust = 0.5)) + 
+  ylab("Proportion of Women (%)") + 
+  xlab("Year")
+```
+
+
+## The Hypotheses
+
+For the study, the hypotheses used to be able to answer the research question of whether female political representation affects economic growth are stated below:
+
+The null hypothesis for the study is:
+
+- H~0~ = The proportion of female political representation has no effect on economic growth.
+
+The alternative hypothesis for the study is:
+
+- H~1~ = The proportion of female political representation has an effect on economic growth.
+
+
+[^EconomicGrowth]: Cambridge Dictionary. (2022). *Meaning of economic growth in English*. Retrieved from https://dictionary.cambridge.org/dictionary/english/economic-growth
+
+[^FemalePop]: The World Bank. (2022). *Population, female (% of total population)*. Retrieved from https://data.worldbank.org/indicator/SP.POP.TOTL.FE.ZS
+
+\newpage
+################################################################################
+
+# Data Source 
+
+The paper's response variable (GDP data) comes from two sources for robustness purposes: the World Bank and the Penn World Table. For our assignment, we have focused on the World Bank data. 
+However, it is worth mentioning that The Penn World Table is a dataset maintained jointly by researchers at the University of California, Davis, and the Groeningen Growth Development Centre at the University of Groningen. It measures real gross domestic product over time and across countries. 
+
+The World Bank is an international financial institution formed by 189 member countries. Its purpose is to provide financial support and technical assistance for development and poverty alleviation projects, as well as to provide aid to countries in distress[^WBAboutUs]. Having an up-to-date database that can keep track of improvements and developments is of paramount importance. Much of the data comes from the member countries' national statistical offices and systems[^WBOpenData], with which the World Bank works to improve their capacity, efficiency and effectiveness.
+
+Data on the proportion of women in parliament comes from both the World Bank and a data collection by Paxton *et al.* (2008)[^Paxton], involving more than 150 countries between 1945 and 2003. This second dataset contains information on women's suffrage, political positions, role in the government, etc. We are interested in the annual percentage of women in parliament. *Note: For bicameral parliaments, only the lower house is considered.*
+
+As standard growth determinants, the paper's author included: Elementary school enrollment rate with an estimated male and female ratio, trade and investments as a share of the GDP, and the population growth rate. Values come from the Work Bank and Heston *et al.* (2011)[^Heston], the latter being the 7.0 version of the Penn World Table.
+
+Finally, all the countries deemed not to be democracies were discarded from the data. To make this distinction, the reference was Cheibub *et al.* (2010)[^Cheibub], which used a dataset that identified the various types of regimes in place in over 199 countries from January 1, 1946 (or date of independence) to December 31, 2008.  
+
+Below Table 1 is a preview of the data set used for the study:
+
+```{r, echo = FALSE, error = FALSE, warning = FALSE, message =FALSE}
+kable(data[1:25, ],
+      caption = "Imported Data (Rows 1-25)")%>%
+  kable_styling(latex_options = c("hold_position","scale_down"))%>%
+  column_spec(1:12, width = "6em")
+```
+   
+<p>&nbsp;</p>
+
+Below is the structure of the data used for the study:
+
+```{r, echo = FALSE , error = FALSE, warning = FALSE, message =FALSE}
+str(data)
+```
+
+
+The dataset consists of 3376 observations and 12 variables that are defined as follows:
+
+* *lngdp_dif_rs*: The GDP per capita growth rate in logarithmic scale, World Bank data (%)
+* *lngdp_dif_pwt_rs*: The GDP per capita growth rate in logarithmic scale, Penn World Table data, (%)
+* *pow*: Proportion of woman in parliament (%)
+* *lloggdppercapcon*: GDP per capita on a logarithmic scale, World Bank data (PPP US dollar)
+* *lngdpp_penn*: GDP per capita on a logarithmic scale, Penn World Table data (PPP US dollar)
+* *enrolprgr*: School enrollment rate (%)
+* *openness_gdp*: Trade indicator as share of GDP (%)
+* *investment_sharegdp*: Investment as share of GDP (%)
+* *populationgrowth*: Population growth rate (%)
+* *year*: Year
+* *ldemocracy_cheibub*: Democracy indicator (1 = Yes, 0 = No)
+* *ccode*: Country code
+
+
+## Data Cleaning
+
+The data cleaning stage required a few techniques to prepare the data for modelling. Columns with data from the Penn World Table were removed as we focused on the World Bank Data. We decided to rename the variables to more interpretable names, e.g. lngdp_dif_rs to GDP_Growth.
+
+The study included observations from 1970 to 2009, but also produced in a separate model with observations only from 1993 onwards. We created a new dummy variable to indicate whether the observation is between 1993 to 2009. Subsequently, both the 'Year' and 'Country' variables were changed to factor types. Finally, the data was split into two data frames with one containing all observations and the other containing observations from 1993 to 2009.
+
+Below is confirmation of the number of countries and observations in each data frame:
+
+```{r, echo = FALSE, results = 'hide' , error = FALSE, warning = FALSE, message =FALSE}
+#Remove columns not required
+data_1 <-dplyr::select(data, -c('lngdp_dif_pwt_rs', 'llngdpp_penn', 'ldemocracy_cheibub'))
+
+#Rename columns
+colnames(data_1) <- c("GDP_Growth", "Proportion_Women", "GDP_Per_Cap", "School_Enrollment_Rate",
+                           "Openness", "Investment", "Pop_Growth", "Year", "Country")
+
+
+# Create dummy variable for year >= 1993
+data_1$After_1993 <- ifelse(data_1$Year >= 1993,1,0)
+
+# Check for NA's
+anyNA(data_1)
+
+# Drop any NA's in dataframe
+data_1 <- data_1 %>% 
+                drop_na()
+
+# Change Year data type
+#data_1$Country <- as.factor(data_1$Country)
+data_1$Year <- as.factor(data_1$Year)
+
+# Split dataframe for year >= 1993
+data_2 <- data_1[data_1$After_1993 != 0, ]
+
+# Change Country variable to factor
+data_2$Country <- as.factor(data_2$Country)
+data_1$Country <- as.factor(data_1$Country)
+
+# Change After_1993 variable to factor
+data_2$After_1993 <- as.factor(data_2$After_1993)
+data_1$After_1993 <- as.factor(data_1$After_1993)
+```
+
+```{r, echo = TRUE , error = FALSE, warning = FALSE, message =FALSE}
+# Inspect data frame (1970 to 2009)
+print(paste0(nrow(data_1), " observations and ", nlevels(data_1$Country),
+             " countries from 1970 to 2009"))
+
+# Inspect data frame (1993 to 2009)
+print(paste0(nrow(data_2), " observations and ", nlevels(data_2$Country),
+             " countries from 1993 to 2009"))
+```
+
+[^WBAboutUs]: The World Bank. (2022). *About the World Bank*. Retrieved from https://www.worldbank.org/en/about
+
+[^WBOpenData]: The World Bank. (2022). *World Bank Open Data: About us*. Retrieved from https://data.worldbank.org/about
+
+[^Paxton]: Paxton, P., Green, J. and Hughes, M. (2008). *Women in Parliamen, 1945-2003: Cross-National Dataset*. Inter-university Consortium for Political and Social Research, Ann Arbor, MI. 
+
+[^Heston]: Heston, A., Summers, R. and Aten, B. (2011). *Penn World Table Version 7.0*. Center for International Comparisons of Production, Income and Prices, University of Pennsylvania, Philadelphia, PA.
+
+[^Cheibub]: Cheibub, J. A., Gandhi, J. and Vreeland, J. R. (2010). *Democracy and dictatorship revisited*. Public Choice, **143**, 67–101.
+
+\newpage
+
+################################################################################
+
+# Descriptive Statistics
+
+## Plotting the Data
+
+Visualisations, such as scatter plots and boxplots, give us an initial overview into the data and a chance to look for some insights into any relationships or correlations between GDP Growth and the Proportion of Women in Parliament. Figure \@ref(fig:2) shows the observations plotted for all years and from 1993 to 2009 in the study.
+
+```{r 2, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, out.height="50%", out.width ="80%", fig.align = 'center', fig.cap="GDP Growth and Proportion of Women in Parliament"}
+
+data_1 %>%
+  ggplot(aes(x=Proportion_Women, y=GDP_Growth, col = After_1993, alpha = 0.8)) +
+  geom_point(alpha = 0.5, size = 0.8) + 
+  ylim(-40, 40) +
+  labs(x = "Proportion of Women in Parliament", y = "GDP Growth") +
+  #ggtitle("GDP Growth and Proportion of Women in Parliament") + 
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values = c("1" = "blue",
+                                "0" = "red")) + 
+  labs(colour = "Year Range") +
+  scale_color_manual(labels = c("All Years", "1993 to 2009"), values = c("red", "blue"))
+```
+The initial inspection doesn't appear to show any striking differences between the observations from all years and from 1993 to 2009. There is a higher density of observations closer to zero on the x-axis from all years compared to 1993 to 2009. This is to be expected, as Figure \@ref(fig:1) in Section 1 of this report shows that, on average, the proportion of female representation in parliament has increased over time. It is also unclear whether there is a correlation between the two variables and whether it is positive or negative.
+
+The main variables in the study are GDP Growth and the Proportion of Women in Parliament. Below we will inspect the characteristics of these variables.
+
+\newpage
+
+## GDP Growth
+
+Figure \@ref(fig:3) and the output below summarise the characteristics of the GDP Growth variable:
+
+```{r 3, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, out.height="50%", out.width ="80%", fig.align = 'center', fig.cap="GDP Growth"}
+# Box plot of GDP Growth
+ggplot(data_1, aes(x=GDP_Growth, y=After_1993, fill = After_1993, alpha = 0.8)) + 
+  stat_boxplot(geom ='errorbar') + 
+  #ggtitle("Boxplot: GDP Growth") +
+  #heme(plot.title = element_text(hjust = 0.5)) +
+  geom_boxplot() + 
+  coord_flip() + 
+  labs(fill = "Year Range", y = "Time Period", x = "GDP Growth") +
+  scale_fill_manual(values = c("1" = "blue",
+                                "0" = "red")) + 
+  scale_fill_manual(labels = c("0 = All Years", "1 = 1993 to 2009"), values = c("red", "blue")) + 
+  scale_alpha(guide = 'none')
+
+# Summary Statistics
+print(paste0("GDP Growth: All Years"))
+summary(data_1$GDP_Growth)
+
+print(paste0(""))
+print(paste0("GDP Growth: 1993 to 2009"))
+summary(data_2$GDP_Growth)
+```
+The median and mean GDP Growth are higher from 1993 to 2009, indicating a period of higher growth rates than the previous years. The standard deviation for GDP Growth over all years is `r  round(sd(data_1$GDP_Growth),2)` and for 1993 to 2009 it is `r round(sd(data_2$GDP_Growth),2)`. The Interquartile range where 50% of the observations lie within is `r round(IQR(data_1$GDP_Growth),2)` for all years and `r round(IQR(data_2$GDP_Growth),2)` for 1993 to 2009. This indicates that the spread of the observations is smaller between 1993 and 2009. The lowest rate of GDP Growth was recorded between 1993 to 2009 with a value of `r round(min(data_2$GDP_Growth),2)`. The highest GDP Growth rate was recorded before 1993 with a value of `r round(max(data_1$GDP_Growth),2)`. The boxplot in Figure \@ref(fig:3) illustrates these points.
+
+\newpage
+
+## Proportion of Women in Parliament
+
+Figure \@ref(fig:4) and the output below summarise the characteristics of the Proportion of Women in Parliament variable:
+
+```{r 4, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, out.height="50%", out.width ="80%", fig.align = 'center', fig.cap="Proportion of Women in Parliament"}
+# Box plot of Proportion Women
+ggplot(data_1, aes(x=Proportion_Women, y=After_1993, fill = After_1993, alpha = 0.8)) + 
+  stat_boxplot(geom ='errorbar') + 
+  #ggtitle("Boxplot: Proportion of Women in Parliament") +
+  #theme(plot.title = element_text(hjust = 0.5)) +
+  geom_boxplot() + 
+  coord_flip() + 
+  labs(fill = "Year Range", y = "Time Period", x = "Proportion of Women in Parliament") +
+  scale_fill_manual(values = c("1" = "blue",
+                                "0" = "red")) + 
+  scale_fill_manual(labels = c("0 = All Years", "1 = 1993 to 2009"), values = c("red", "blue")) + 
+  scale_alpha(guide = 'none')
+
+# Summary Statistics
+print(paste0("Proportion of Women in Parliament: All Years"))
+summary(data_1$Proportion_Women)
+
+print(paste0(""))
+print(paste0("Proportion of Women in Parliament: 1993 to 2009"))
+summary(data_2$Proportion_Women)
+
+```
+
+The median and mean for the Proportion of Women in Parliament are higher from 1993 to 2009, indicating a period change with more women being in parliament with time. The standard deviation over all years is `r  round(sd(data_1$Proportion_Women),2)` and for 1993 to 2009 it is `r round(sd(data_2$Proportion_Women),2)`. The Interquartile range where 50% of the observations lie within is `r round(IQR(data_1$Proportion_Women),2)` for all years and `r round(IQR(data_2$Proportion_Women),2)` for 1993 to 2009. This indicates that the spread of the observations is larger between 1993 and 2009. The lowest rate of female representation in parliament was 0 for both time periods. The highest rate of female representation in parliament was recorded between 1993 to 2009 with a value of `r round(max(data_2$Proportion_Women),2)`. The boxplot in Figure \@ref(fig:4) also illustrates that both data sets are right skewed.
+
+\newpage
+
+################################################################################
+
+# Linear Model's
+
+## Linear Regression
+
+A familiar first step to ascertain the strength of the relationship between variables such as GDP Growth and the Proportion of Women in Parliament would be to fit a linear model. The benefits of linear models are that they are easy to interpret and, with a small number of dimensions, can avoid overfitting. 
+
+Below are the outputs for a linear model with GDP Growth as the response variable and the Proportion of Women in Parliament as the predictor in both periods. Figure \@ref(fig:5) shows the linear models overlayed on top of the observations for both time periods.
+
+```{r, echo = FALSE , error = FALSE, warning = FALSE, message =FALSE}
+# Linear regression data_1
+lm_1 <- lm(GDP_Growth ~ Proportion_Women, data = data_1)
+summary(lm_1)
+
+# Linear regression data_2
+lm_2 <- lm(GDP_Growth ~ Proportion_Women, data = data_2)
+summary(lm_2)
+```
+
+
+```{r 5, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 3, fig.align = 'center', fig.cap="GDP Growth and Proportion of Women in Parliament"}
+
+data_1 %>%
+  ggplot(aes(x = Proportion_Women, y = GDP_Growth, col = After_1993)) +
+  geom_point(alpha = 0.1, size = 0.8) + 
+  ylim(-37, 22) +
+  labs(x = "Proportion of Women in Parliament", y = "GDP Growth") +
+  #ggtitle("Linear Model: GDP Growth and Proportion of Women in Parliament") + 
+  #theme(plot.title = element_text(hjust = 0.5)) +
+  labs(colour = "Year Range") +
+  scale_color_manual(values = c("1" = "blue",
+                                "0" = "red")) + 
+  scale_color_manual(labels = c("All Years", "1993 to 2009"), values = c("red", "blue")) + 
+
+  #geom_smooth(method="lm", se=FALSE) + 
+  
+  geom_abline(slope = lm_1$coefficients[2],
+          intercept = lm_1$coefficients[1],
+          color = "red",
+          size = 0.3) + 
+  
+  geom_abline(slope = lm_2$coefficients[2],
+            intercept = lm_2$coefficients[1],
+            color = "blue",
+            size = 0.3)
+   
+```
+
+Both linear models have similar values for the intercepts, and both are positively correlated. The slope gradient is steeper from 1993 to 2009, indicating a stronger correlation between the two variables. For every increase in one unit of the Proportion of Women in Parliament the GDP Growth rate increases by `r round((lm_1$coefficients[2]),4)` units for all years and `r round((lm_2$coefficients[2]),4)` units between 1993 and 2009. 
+
+The p-values for the Proportion of Women in Parliament are not statistically significant in both periods. Therefore, there is no strong evidence to suggest that the value of the Proportion of Women in Parliament affects the GDP Growth rate. The Adjusted R Squared values for both models are `r round((summary(lm_1)$adj.r.squared),5)` and `r round((summary(lm_2)$adj.r.squared),5)` for all years and 1993 to 2009, respectively. This suggests that the models explain less than 0.001% of the variance.
+
+## Linear Regression with Additive Effect
+
+```{r, echo = FALSE, results = 'hide' , error = FALSE, warning = FALSE, message =FALSE}
+# Linear regression data_1
+lm_3 <- lm(GDP_Growth ~ Proportion_Women + Country, data = data_1)
+```
+
+If we include 'Country' as an additive effect *(as shown in the R Code below)* to improve our model, the Adjusted R Squared figure increases to `r round((summary(lm_3)$adj.r.squared),5)` for all years. Which gives an indication that considering the country in the model may help explain the variability more. Figure \@ref(fig:6) shows the results plotted on a graph, which is hard to interpret and overwhelming. However, there is good reason now to explore the use of a Fixed Effects Model controlling for countries to create a more accurate model. 
+
+```{r, echo = TRUE, results = 'hide' , error = FALSE, warning = FALSE, message =FALSE}
+# Linear regression with addtitive effects (all years)
+lm_3 <- lm(GDP_Growth ~ Proportion_Women + Country, data = data_1)
+```
+
+```{r 6, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE, out.width="50%", fig.align = 'center', fig.cap="Linear Model with Additive Effects (All Years)"}
+# Add regression lines
+data_1 %>%
+  ggplot(aes(x=Proportion_Women, y=GDP_Growth, color = Country)) +
+  geom_point(alpha = 0.3, col = 'black') + 
+  #ggtitle("Linear Model with Additive Effects (All Years)") +
+  #theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(limits = c(-50, 50)) +
+  scale_x_continuous(limits = c(0, 50)) +
+  labs(x = "Proportion of Women", y = "GDP Growth") +
+  geom_smooth(method = lm, se = FALSE, fullrange = TRUE, size = 0.2) + # Remove CI, extend regression lines 
+  theme(legend.position="none")
+```
+
+\newpage
+
+################################################################################
+
+# Fixed Effects Method
+
+## Fixed Effects Regression
+Panel data is defined as a dataset in which the behaviour of **"entities"** or **"units"** are observed over a certain number of time periods. These entities or units could be countries, individuals, corporations, etc.
+
+In general, we can distinguish two kinds of panel datasets[^SchmidL6]:
+
+* **Balanced Panel** refers to a dataset in which all N units are observed in every time period t.
+* **Unbalanced Panel** refers to a dataset in which at least one unit i at some time period t has missing data.
+
+For a randomly drawn cross-selectional unit i, the model is given by:
+
+$$ Y_{it} = \beta_{0} + X_{1it}\beta_{1} + ... + X_{Kit}\beta_{K} + \mu_{i} + u_{it} $$
+
+In our example:
+
+* $Y_{it}$: GDP growth (%) of country i in year t
+
+* $X_{1it}$, ..., $X_{Kit}$: Variable inputs for country i in year t, such as proportion of women in parliament, openness as share of GDP, etc. 
+
+* $\beta_{1}$, ..., $\beta_{k}$: Marginal effects of variable inputs
+
+* $\mu_{i}$: Country effect, i.e., the sum of all inputs that remain invariant over time, known to country i, but not observed by the researcher. In our example, they may be represented by the culture of the country, level of corruption, etc. We often call $\mu_{i}$ unobserved effect or unobserved heterogeneity[^SchmidL6].
+
+* $u_{it}$: Idiosyncratic error, time-varying unobserved inputs, such as business cycles, unknown to the country at the time the decision on the variable inputs $\beta_{1}$, ..., $\beta_{k}$.
+
+If we ignore the panel structure of the data and regress $Y_{it}$ on $X_{1it}$, ..., $X_{Kit}$, we estimate the following model:
+$$ Y_{it} = \beta_{0} + X_{1it}\beta_{1} + ... + X_{Kit}\beta_{K} + v_{i}$$
+
+With composite error $v_{i}$ $\equiv$ $\mu_{i}$ + $u_{it}$.
+
+The OLS regression is unbiased. If $X_{1it}$, ..., $X_{Kit}$ are **strictly exogenous**, that means that the composite error $v_{it}$ in each time period is uncorrelated with the past, current and future regressors. That implies that there is no correlation between unobserved effect $\mu_{i}$ and the regressors for all t.
+
+However, there could be some unobserved inputs that could have an effect on our dependent variables and lead to an omitted variable bias.
+To avoid this we apply *fixed effect regression*, where the unobserved $\mu_{i}$ is allowed to be correlated with $X_{1it}$, ..., $X_{Kit}$. 
+Since $\mu_{i}$ is not observable, it cannot be directly controlled for. The fixed-effects model eliminates $\mu_{i}$ by de-meaning the variables using the *within* transformation[^Wiki].
+We calculate the mean of all variables in the regression model as follows, for simplicity we continue with only one regressor:
+
+$$\bar{Y}_{i} = \beta_{1}\bar{X}_{i} + \mu_{i} + \bar{u}_{i} $$
+We then make the difference between:
+
+$$Y_{it} = \beta_{1}X_{it} + \mu_{i} + u_{it} $$
+
+and
+
+$$\bar{Y}_{i} = \beta_{1}\bar{X}_{i} + \mu_{i} + \bar{u}_{i} $$
+This leads to the following *entity-demeaned* model, which get rid of fixed effects:
+
+$$\tilde{Y}_{it} = \beta_{1}\tilde{X}_{it} + \tilde{u}_{i}$$
+Where $\tilde{Y}_{it}$ = $Y_{it}$ - $\bar{Y}_{i}$; $\tilde{X}_{it}$ = $X_{it}$ - $\bar{X}_{i}$ and $\tilde{u}_{it}$ = $u_{it}$ - $\bar{u}_{i}$
+
+
+## Our assignment
+
+In our example, we are measuring the GDP per capita growth rate of a series of democratic countries (= the *units*) over a period of time. This reflects the given panel-data definition. 
+
+We can check whether two data sets resulting from the data preparation phase are balanced or unbalanced.
+
+
+```{r}
+# Data from 1970 - 2009
+is.pbalanced(data_1)
+```
+
+```{r}
+# Data from 1993 - 2009
+is.pbalanced(data_2)
+```
+
+
+As established in the previous paragraph, if we applied a linear regression under the assumption of strict exogeneity, we would also ignore the unobserved country effect $\mu_{i}$. However, it is not plausible to think that time-invariant characteristics such as culture, geography, or population preferences have no impact on the dependent variables. Therefore, to avoid a biased model, we need to eliminate these fixed effects and apply OLS to the transformed model. 
+
+
+[^SchmidL6]: Schmid, L. (2022). *Panel Data (Lecture slides)*. HSLU
+[^Wiki]: Wikipedia. (2002). *Fixed effects model*. Retrieved from https://en.wikipedia.org/wiki/Fixed_effects_model 
+
+
+\newpage
+
+################################################################################
+
+# The Results
+
+## Fixed Effects Model: Equation
+
+Below is the equation chosen to implement the fixed effects model:
+
+$$ 100(Y_{i,t} - Y_{i, t-1}) = \beta_{1}Y_{i,t-1} + \beta_{2}W_{i,t} + X^{'}_{i,t}\beta + \beta_{i} + \beta_{t} + \varepsilon_{i,t} $$
+
+## Fixed Effects Model: R Code
+
+Below is the code used to execute the fixed effect models for both all years and 1993 to 2009:
+
+```{r, echo = TRUE, results = 'hide', error = FALSE, warning = FALSE, message = FALSE}
+# Fixed effects model for all years
+model_1 = feols(GDP_Growth ~ Proportion_Women + 
+                GDP_Per_Cap +
+                School_Enrollment_Rate +
+                Openness +
+                Investment +
+                Pop_Growth + 
+                Year | Country,
+                data = data_1)
+
+# Fixed effects model for 1993 to 2009
+model_2 = feols(GDP_Growth ~ Proportion_Women + 
+                GDP_Per_Cap +
+                School_Enrollment_Rate +
+                Openness +
+                Investment +
+                Pop_Growth + 
+                Year | Country,
+                data = data_2)
+```
+
+
+
+## Fixed Effects Model: Output
+
+The original paper's output for the models is presented in tabular form, including information such as the coefficients for each variable and the standard error. We used the modelsummary() function from the modelsummary library to present the results similarly. The benefit of using the modelsummary() function is its flexibility to tailor the output. 
+
+The notes section for Table 1 in the paper states ' * * * , * * and * Denote significance at the 1%, 5% and 10% levels, respectively, which differed from the significance levels in our models from section 6.1. Modelsummary(), has the functionality to change the significance levels by using the following argument 'stars = c('* ' = .1, '* * ' = .05, '* * *' = .01)'. 
+
+Another customisation required was choosing the information stated beneath the coefficients. Using the tribble() function from the tibble library, we could include information such as the number of unique countries in each model.
+
+Below Table 2 shows the output of the two models:
+
+\newpage 
+
+```{r, echo = FALSE, error = FALSE, warning = FALSE, message = FALSE}
+# Join both models
+models <- list("All years" = model_1,
+               "1993 +" = model_2)
+
+# Add extra rows to output
+rows <- tribble(~term,          ~OLS,  ~Logit,
+                "Ratio: Female/male primary gross school enrolment rate~t~", "","",
+                'Year dummies', "Yes",   "Yes",
+                'Countries',    toString(n_distinct(data_1$Country)),   toString(n_distinct(data_2$Country)))
+
+# Position of extra rows
+attr(rows, 'position') <- c(13, 14, 16)
+
+# Rename output statistics
+rename <- tibble::tribble(  ~raw,          ~clean,              ~fmt,
+                            "r2.within",  "*R^2^* (within)",   2,
+                            "nobs",       "Observations",      0)
+
+# Create output table
+modelsummary(models,
+             
+             # Output to markdown format
+             output = "markdown",
+             
+             # Add title
+             title = '__Fixed-effects results (annual panel); Dependent variable: 100 x
+                      (Ln GDP per capita~t~ - Ln GDP per capita~t-1~)__',
+             
+             # Add custom statistical significance symbols
+             stars = c('*' = .1, '**' = .05, '***' = .01),
+             estimate = "{estimate}{stars}",
+            
+             # Change renamed output statistics
+             gof_map = rename,
+             
+             # Rename variables
+             coef_map = c("Proportion_Women" = "Seats held by women in national parliament (%)~t~",
+                             "GDP_Per_Cap" = "ln GDP per capita~t-1~",
+                             "School_Enrollment_Rate" = "School enrolment rate, primary (% gross)~t~",
+                             "Openness" = "Trade (% GDP)~t~",
+                             "Investment" = "Investment (% GDP)~t~",
+                             "Pop_Growth" = "Population growth rate~t~"
+                             ),
+             # Add extra rows
+             add_rows = rows,
+             
+             # Add Notes
+             notes = "Years in full sample: 1970–2009. 
+                      Robust SEs are given in parentheses. 
+                      The R^2^ includes the explanatory power of the year dummies. <br />  
+                      \\***, \\** and \\* Denote significance at the 1%, 5% and 10% levels, respectively."
+             
+)
+```
+
+## Fixed Effects Model: Interpretation
+
+The results obtained in the first column of the table, which includes the entire sample from 1970 to 2009, did not provide sufficient evidence to reject the null hypothesis that the proportion of seats held by women in national parliament affects the GDP per capita growth rate at the 10% significance level.
+
+In the second column of table 2, we find the estimated coefficients by restricting the sample to 1993 - 2009. The split from 1993 is due to S. Huntington's definition of *"third wave of democratization"*[^Huntington], meaning a global trend that has seen a series of transitions from authoritarian to democratic regimes during the end of the 20th century. This third wave peaked in 1991-92 after the fall of communist regimes in Eastern Europe. Here, the effect of the proportion of women in parliament on economic growth is statistically significant at the 1% level, i.e. we have enough evidence that supports the alternative hypothesis. 
+
+Holding the other variables constant, for each additional percentage point of female parliamentary representation, on average, we have an increase in annual GDP per capita growth rate of around 0.11 percentage points. 
+
+The authors of the paper are concerned that the estimates are inconsistent due to the endogeneity of lagged log GDP per capita and the potential endogeneity of the other explanatory variables. In a second step, they deal with the endogeneity bias by applying the generalized method of moments (GMM) for panel data. The results also identify a positive effect of women's parliamentary representation on GDP growth. 
+
+As defined in the data sources section, two data sources were used for robustness purposes. In our report, we focused only on the World Bank data, but in the original paper, the same analysis applied to the PWT data provided the same results: A greater proportion of women in parliament has a positive effect on economic growth. 
+
+[^Huntington]: Huntington, S. P. (1991). *The Third Wave: Democratization
+in the Late Twentieth Century*. University of Oklahoma
+Press, Norman, OK.
+
+\newpage
+
+################################################################################
+
+# Conclusion
+
+We could replicate the results of columns 1 and 2 from Table 1 in the research paper exactly. After we had prepared the data sufficiently, we got close to the desired outputs surprisingly quickly. However, we had lower 'adjusted $R^{2}$ within' values than the research paper. When investigating why this is the case, we stumbled across the plm() function from the plm library. Using this function with the argument 'model = "within" ', we returned results with the same coefficients and adjusted $R^{2}$ within values but different standard errors. 
+
+We decided to revisit the original models using the feols() function and tweaked the formula, which finally gave us the exact same results as the research paper. As mentioned in section 6.3, replicating the output required reading up on how to use the modelsummary() function, which was very rewarding when we got the final output.
+
+In general, many studies analyze women's empowerment and inclusion in the economy, including their effect on economic development and growth.[^Mehra][^Dollar][^Duflo]. However, Jayasuriya & Burke's study focused on the presence of women in politics, specifically on their representation in national parliaments.
+
+In this specific area of research, we found a more recent study by E. Khorsheed[^Khorsheed] that starts from the basis laid by the paper of Jayasuriya & Burke. Khorsheed considers similar variables: Percentage of seats in parliament held by women, population growth rate, GDP per capita, and foreign direct investment. He then uses the Principle Component Regression to assess the independent impact of women parliamentarians on economic growth. The findings are consistent with the study we are discussing in this report. The evidence suggested that economic growth will be enhanced by increasing the proportion of women's seats in parliament.
+
+Another study worth mentioning is that of Baskaran *et al.*[^Baskaran]. They investigated Indian legislative assembly elections, focusing on close elections between men and women, and they identified significantly higher growth in economic activity in constituencies that elect women. This study is limited to one country, but it gives us a couple of insights into why a greater proportion of women in parliament would improve economic growth. For example, female parliamentarians tend to be less opportunistic, less corrupt, and more effective in completing projects in their constituencies than their male counterparts.
+
+[^Mehra]: Mehra, R. (1997). *Women, Empowerment, and Economic Development*. The ANNALS of the American Academy of Political and Social Science. **554(1)**, 136–149.
+[^Dollar]: Dollar, D., Gatti, R. (1999). *Gender inequality, income, and growth: are good times good for women? (Vol. 1)*. Washington, DC: Development Research Group, The World Bank.
+[^Duflo]: Duflo, E. 2012. *Women Empowerment and Economic Development*. Journal of Economic Literature, **50 (4)**, 1051-79.
+[^Khorsheed]: Khorsheed, E., (2020). *The Impact of Women Parliamentarians on Economic Growth: Modelling & Statistical Analysis of Empirical Global Data*. International Journal of Statistics and Probability, Canadian Center of Science and Education, **9(3)**, 1-23. 
+[^Baskaran]: Baskaran, T, Bhalotra, S. Min, B. Uppal, Y. (2018). *Women Legislators and Economic Performance*. IZA Discussion Paper 11596. Institute of Labor Economics, Bonn.
+
+
+
+
+
+
+
+
+
+
